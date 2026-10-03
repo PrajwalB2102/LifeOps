@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LifeOps</string>
+    <string name="title_activity_main">LifeOps</string>
+    <string name="package_name">com.prajwalbendre.lifeops</string>
+    <string name="custom_url_scheme">com.prajwalbendre.lifeops</string>
+</resources>
