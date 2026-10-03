@@ -117,9 +117,24 @@ function App() {
     const { error } = await supabase.auth.signOut();
     if (error) console.error('LifeOps could not sign out of Supabase.');
   };
-  const deleteAccount = async (id) => {
+  const clearLocalData = async (id) => {
     localStorage.removeItem(KEYS.data(id));
     await signOut();
+  };
+  const deleteAccount = async (id) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-account');
+      if (error || data?.success !== true) {
+        console.error('LifeOps could not delete the Supabase account.');
+        return { success: false, error: 'We could not delete your account. Your account is still active.' };
+      }
+      localStorage.removeItem(KEYS.data(id));
+      await signOut();
+      return { success: true };
+    } catch {
+      console.error('LifeOps could not reach the account deletion service.');
+      return { success: false, error: 'We could not delete your account. Your account is still active.' };
+    }
   };
 
   if (!ready) return <div className="boot-screen"><span className="brand-mark">L</span><span>Loading your workspace…</span></div>;
@@ -132,7 +147,7 @@ function App() {
     name: session.user.user_metadata?.display_name || '',
     email: session.user.email || '',
   };
-  return <LifeOps account={account} onSignOut={signOut} onDeleteAccount={deleteAccount} />;
+  return <LifeOps account={account} onSignOut={signOut} onClearLocalData={clearLocalData} onDeleteAccount={deleteAccount} />;
 }
 
 function Onboarding({ onComplete }) {
@@ -207,7 +222,7 @@ function Auth() {
   </div></main>;
 }
 
-function LifeOps({ account, onSignOut, onDeleteAccount }) {
+function LifeOps({ account, onSignOut, onClearLocalData, onDeleteAccount }) {
   const [page, setPage] = useState('home');
   const [brightMode, setBrightMode] = useState(() => read('lifeops.theme.v1', false));
   const [data, setData] = useState({});
@@ -687,7 +702,7 @@ function LifeOps({ account, onSignOut, onDeleteAccount }) {
       {page === 'tasks' && <Tasks tasks={tasks} onAdd={() => setEditor({ type: 'tasks', item: null })} onEdit={(item) => setEditor({ type: 'tasks', item })} onDelete={(id) => removeItem('tasks', id)} onToggle={toggleTask} />}
       {page === 'habits' && <Habits habits={habits} onAdd={() => setEditor({ type: 'habits', item: null })} onEdit={(item) => setEditor({ type: 'habits', item })} onDelete={(id) => removeItem('habits', id)} onToggle={toggleHabit} />}
       {page === 'goals' && <Goals goals={goals} onAdd={() => setEditor({ type: 'goals', item: null })} onEdit={(item) => setEditor({ type: 'goals', item })} onDelete={(id) => removeItem('goals', id)} onProgress={updateGoalProgress} />}
-      {page === 'profile' && <Profile account={account} profile={profile} onSave={saveProfile} onSignOut={onSignOut} onDelete={() => onDeleteAccount(account.id)} />}
+      {page === 'profile' && <Profile account={account} profile={profile} onSave={saveProfile} onSignOut={onSignOut} onClearLocal={() => onClearLocalData(account.id)} onDelete={() => onDeleteAccount(account.id)} />}
     </section>
     {editor && <Editor type={editor.type} item={editor.item} onClose={() => setEditor(null)} onSave={(item) => saveItem(editor.type, item)} onDelete={editor.item ? () => removeItem(editor.type, editor.item.id) : null} />}
   </main>;
@@ -717,12 +732,26 @@ function Goals({ goals, onAdd, onEdit, onDelete, onProgress }) {
   return <div className="page"><PageIntro eyebrow="A DIRECTION, NOT A DEADLINE" title="Goals" body="Track progress without losing sight of why it matters." action="+ New goal" onClick={onAdd} />{goals.length ? <div className="goals-grid">{goals.map((goal) => <div className="card goal-card" key={goal.id}><div className="item-actions"><span className="goal-tag">{goal.area || 'Personal'}</span><Actions onEdit={() => onEdit(goal)} onDelete={() => onDelete(goal.id)} /></div><h2>{goal.title}</h2><p>{goal.description || 'Keep moving at a sustainable pace.'}</p><GoalProgress goal={goal} onProgress={(value) => onProgress(goal.id, value)} /><div className="goal-deadline">{goal.deadline ? `Target · ${formatShortDate(goal.deadline)}` : 'No deadline set'}</div></div>)}</div> : <div className="card empty-card"><EmptyState icon="↗" title="What are you moving toward?" body="Set a goal that gives your everyday actions a little more meaning." action="Create a goal" onClick={onAdd} /></div>}</div>;
 }
 
-function Profile({ account, profile, onSave, onSignOut, onDelete }) {
+function Profile({ account, profile, onSave, onSignOut, onClearLocal, onDelete }) {
   const [form, setForm] = useState(profile);
   const [confirm, setConfirm] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [section, setSection] = useState('');
   useEffect(() => setForm(profile), [profile]);
-  return <div className="page"><PageIntro eyebrow="YOUR SPACE" title="Profile" body="Keep your account-backed workspace recognisably yours." /><div className="profile-grid"><div className="card profile-card"><div className="profile-heading"><span className="avatar large">{initials(form.name || account.name)}</span><div><h2>{form.name || account.name}</h2><p>{account.email}</p></div></div><form onSubmit={(event) => { event.preventDefault(); onSave({ ...form, name: form.name.trim() || account.name, email: account.email }); }}><label>Name<input value={form.name || ''} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Pronouns <span className="optional">optional</span><input value={form.pronouns || ''} onChange={(event) => setForm({ ...form, pronouns: event.target.value })} placeholder="e.g. she/her" /></label><label>Timezone<input value={form.timezone || ''} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label><button className="primary-button" type="submit">Save profile</button></form></div><div className="settings-stack"><div className="card setting-card subscription"><span className="eyebrow compact">CURRENT PLAN</span><h2>Free workspace</h2><p>Your core workspace is synced through Supabase. Premium billing is not connected, so no features are falsely unlocked.</p><button className="secondary-button" disabled>Plans coming later</button></div><div className="card setting-card"><h2>Settings & information</h2><a className="setting-row" href="https://life-ops-nine.vercel.app/privacy-policy.html" target="_blank" rel="noopener noreferrer"><span><strong>Privacy</strong><small>Open the public privacy policy</small></span><b>↗</b></a><button className="setting-row" onClick={() => setSection(section === 'terms' ? '' : 'terms')}><span><strong>Terms & limitations</strong><small>Prototype disclosure</small></span><b>→</b></button>{section === 'terms' && <p className="setting-detail">LifeOps uses authenticated Supabase services, but some production features are still incomplete. Do not treat it as fully production-ready or as the sole record for critical health, financial, or safety decisions.</p>}<button className="signout-button" onClick={onSignOut}>Sign out</button></div><div className="card danger-card"><h2>Clear local data</h2><p>Remove local browser workspace data and sign out. This does not delete your Supabase account or remote data.</p>{confirm ? <div className="confirm-actions"><button className="danger-button" onClick={onDelete}>Clear local data</button><button className="secondary-button" onClick={() => setConfirm(false)}>Cancel</button></div> : <button className="danger-link" onClick={() => setConfirm(true)}>Clear local data</button>}</div></div></div></div>;
+  const handleDeleteAccount = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError('');
+    const result = await onDelete();
+    if (!result?.success) {
+      setDeleteError(result?.error || 'We could not delete your account. Your account is still active.');
+      setDeleting(false);
+      return;
+    }
+  };
+  return <div className="page"><PageIntro eyebrow="YOUR SPACE" title="Profile" body="Keep your account-backed workspace recognisably yours." /><div className="profile-grid"><div className="card profile-card"><div className="profile-heading"><span className="avatar large">{initials(form.name || account.name)}</span><div><h2>{form.name || account.name}</h2><p>{account.email}</p></div></div><form onSubmit={(event) => { event.preventDefault(); onSave({ ...form, name: form.name.trim() || account.name, email: account.email }); }}><label>Name<input value={form.name || ''} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Pronouns <span className="optional">optional</span><input value={form.pronouns || ''} onChange={(event) => setForm({ ...form, pronouns: event.target.value })} placeholder="e.g. she/her" /></label><label>Timezone<input value={form.timezone || ''} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label><button className="primary-button" type="submit">Save profile</button></form></div><div className="settings-stack"><div className="card setting-card subscription"><span className="eyebrow compact">CURRENT PLAN</span><h2>Free workspace</h2><p>Your core workspace is synced through Supabase. Premium billing is not connected, so no features are falsely unlocked.</p><button className="secondary-button" disabled>Plans coming later</button></div><div className="card setting-card"><h2>Settings & information</h2><a className="setting-row" href="https://life-ops-nine.vercel.app/privacy-policy.html" target="_blank" rel="noopener noreferrer"><span><strong>Privacy</strong><small>Open the public privacy policy</small></span><b>↗</b></a><button className="setting-row" onClick={() => setSection(section === 'terms' ? '' : 'terms')}><span><strong>Terms & limitations</strong><small>Prototype disclosure</small></span><b>→</b></button>{section === 'terms' && <p className="setting-detail">LifeOps uses authenticated Supabase services, but some production features are still incomplete. Do not treat it as fully production-ready or as the sole record for critical health, financial, or safety decisions.</p>}<button className="signout-button" onClick={onSignOut}>Sign out</button></div><div className="card danger-card"><h2>Delete account</h2><p>Permanently delete your LifeOps account and associated remote workspace data. This cannot be undone.</p>{deleteError && <p className="setting-detail" role="alert">{deleteError}</p>}{deleteConfirm ? <div className="confirm-actions"><button className="danger-button" onClick={handleDeleteAccount} disabled={deleting}>{deleting ? 'Deleting account…' : 'Delete account'}</button><button className="secondary-button" onClick={() => setDeleteConfirm(false)} disabled={deleting}>Cancel</button></div> : <button className="danger-link" onClick={() => { setDeleteError(''); setDeleteConfirm(true); }}>Delete account</button>}<h2>Clear local data</h2><p>Remove local browser workspace data and sign out. This does not delete your Supabase account or remote data.</p>{confirm ? <div className="confirm-actions"><button className="danger-button" onClick={onClearLocal}>Clear local data</button><button className="secondary-button" onClick={() => setConfirm(false)}>Cancel</button></div> : <button className="danger-link" onClick={() => setConfirm(true)}>Clear local data</button>}</div></div></div></div>;
 }
 
 function Editor({ type, item, onClose, onSave, onDelete }) {
